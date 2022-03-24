@@ -1,140 +1,110 @@
-import datetime as dt
+import argparse
 import logging
 import os
-import time
-from enum import Enum
+import sys
+from datetime import datetime, timedelta
 
 import google.cloud.logging
-import smtplib
 import requests
-from twilio.rest import Client
+import twitter
 
-logger = logging.getLogger(__name__)
+DELTA = 12  # Weeks
+LOCATIONS = [
+    ("Toronto Enrollment Center", 5027),
+    ("Buffalo-Ft. Erie Enrollment Center", 5022),
+    ("Niagara Falls Enrollment Center", 5161),
+]
 
-NUM_RETRIES = 5
-SLEEP_TIME = 0.05
+LOGGING_FORMAT = "%(asctime)s %(name)-12s %(levelname)-8s %(message)s"
 
-CURRENT_APPOINTMENT = (5161, dt.datetime(year=2022, month=1, day=31))
-DATE_FORMAT = "%Y-%m-%dT%H:%M"
-LOCATIONS = {
-    5161: "Niagara Falls Enrollment Center",
-    5022: "Buffalo-Ft. Erie Enrollment Center",
-    5520: "Lansdowne, ON",
-    5027: "Toronto Enrollment Center",
-}
-URL_TEMPLATE = "https://ttp.cbp.dhs.gov/schedulerapi/slots?orderBy=soonest&limit=3&locationId={location_id}&minimum=1"
+SCHEDULER_API_URL = "https://ttp.cbp.dhs.gov/schedulerapi/locations/{location}/slots?startTimestamp={start}&endTimestamp={end}"
+TTP_TIME_FORMAT = "%Y-%m-%dT%H:%M"
 
-
-def retry_get_request(url: str, num_retries: int) -> requests.Response:
-
-    while True:
-        num_retries -= 1
-        try:
-            return requests.get(url)
-        except requests.exceptions.ConnectionError:
-            if num_retries == 0:
-                raise
-            else:
-                time.sleep(SLEEP_TIME)
+NOTIF_MESSAGE = "New appointment slot open at {location}: {date}"
+MESSAGE_TIME_FORMAT = "%A, %B %d, %Y at %I:%M %p"
 
 
-def get_appointments() -> list[dict]:
+def tweet(message: str) -> None:
 
-    appointments = []
-    for id, location in LOCATIONS.items():
-
-        url = URL_TEMPLATE.format(location_id=id)
-        logger.info(f"{id=}, {location=}, {url=} | sending GET request")
-
-        for appt in retry_get_request(url, NUM_RETRIES).json():
-            if (
-                appt["locationId"] == CURRENT_APPOINTMENT[0]
-                and dt.datetime.strptime(appt["startTimestamp"], DATE_FORMAT) >= CURRENT_APPOINTMENT[1]
-            ):
-                continue
-
-            appointments.append(appt)
-
-        time.sleep(SLEEP_TIME)
-
-    return appointments
-
-
-def parse_appointments(appointments: list[dict]) -> str:
-
-    logger.info(f"{appointments=} | parsing appointments")
-
-    message = "FOUND APPOINTMENTS:"
-    for appointment in appointments:
-
-        location = LOCATIONS[appointment["locationId"]]
-        time = appointment["startTimestamp"]
-
-        message += f"\n\n* {location} at {time}"
-
-    message += "\n\nhttps://ttp.cbp.dhs.gov/"
-
-    return message
-
-
-def send_text_message(message: str) -> None:
-
-    logger.info(f"{message=} | sending text message")
-
-    account_sid = os.environ["TWILIO_ACCOUNT_SID"]
-    auth_token = os.environ["TWILIO_AUTH_TOKEN"]
-    client = Client(account_sid, auth_token)
-
-    message = client.messages.create(
-        body=message,
-        from_="+19704428745",
-        to='+16467346769'
+    api = twitter.Api(
+        consumer_key=os.environ["CONSUMER_KEY"],
+        consumer_secret=os.environ["CONSUMER_SECRET"],
+        access_token_key=os.environ["ACCESS_TOKEN_KEY"],
+        access_token_secret=os.environ["ACCESS_TOKEN_SECRET"],
     )
+    try:
+        api.PostUpdate(message)
+    except twitter.TwitterError as e:
+        if len(e.message) == 1 and e.message[0]["code"] == 187:
+            logging.info("Tweet rejected (duplicate status)")
+        else:
+            raise
 
+def check_for_openings(location_name: str, location_code: int, test_mode: bool = True) -> None:
 
-def send_email(body: str) -> None:
+    start = datetime.now()
+    end = start + timedelta(weeks=DELTA)
 
-    logger.info(f"{body=} | sending email")
-
-    gmail_user = os.environ["GMAIL_USER"]
-    gmail_password = os.environ["GMAIL_PASSWORD"]
-
-    sent_from = gmail_user
-    to = [gmail_user]
-
-    email_text = f"Subject: Nexus Appointments\n\n{body}"
+    url = SCHEDULER_API_URL.format(
+        location=location_code,
+        start=start.strftime(TTP_TIME_FORMAT),
+        end=end.strftime(TTP_TIME_FORMAT)
+    )
+    logging.info(f"Fetching data from {url}")
 
     try:
-        server = smtplib.SMTP("smtp.gmail.com", 587)
-        server.starttls()
-        server.login(gmail_user, gmail_password)
-        server.sendmail(sent_from, to, email_text)
-        server.close()
-        logger.info(f"{sent_from=}, {to=} | successfully sent email")
+        results = requests.get(url).json()
+    except requests.ConnectionError:
+        logging.exception("Could not connect to scheduler API")
+        sys.exit(1)
 
-    except:
-        logger.info(f"{sent_from=}, {to=} | failed to send email")
-        raise
+    for result in results:
+        if result["active"] > 0:
+            logging.info(f"Opening found for {location_name}")
+
+            timestamp = datetime.strptime(result["timestamp"], TTP_TIME_FORMAT)
+            message = NOTIF_MESSAGE.format(
+                location=location_name,
+                date=timestamp.strftime(MESSAGE_TIME_FORMAT)
+            )
+            if test_mode:
+                print(message)
+            else:
+                logging.info("Tweeting: " + message)
+                tweet(message)
+            return  # Halt on first match
+
+    logging.info(f"No openings for {location_name}")
 
 
-def nexus() -> None:
+def setup_logging(test_mode: bool) -> None:
 
-    if appointments := get_appointments():
-        logger.info("found appointments | nexus")
-        message = parse_appointments(appointments)
-        send_email(message)
+    if test_mode:
+        logging.basicConfig(
+            format=LOGGING_FORMAT,
+            level=logging.INFO,
+            stream=sys.stdout
+        )
 
     else:
-        logger.info("did not find any appointments | nexus")
+        client = google.cloud.logging.Client()
+        client.setup_logging()
 
 
-def setup_logging() -> None:
+def main() -> None:
 
-    client = google.cloud.logging.Client()
-    client.setup_logging()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--test", action="store_true", default=False)
+    parser.add_argument("--verbose", action="store_true", default=False)
+    args = parser.parse_args()
+
+    setup_logging(args.test)
+
+    logging.info("Starting checks (locations: {})".format(len(LOCATIONS)))
+    for location_name, location_code in LOCATIONS:
+        check_for_openings(location_name, location_code, args.test)
 
 
-def main(data, context) -> None:
+if __name__ == "__main__":
 
-    setup_logging()
-    nexus()
+    main()
