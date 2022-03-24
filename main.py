@@ -105,6 +105,11 @@ def main() -> None:
         check_for_openings(location_name, location_code, args.test)
 
 
+def google_cloud_entry(data, context):
+
+    main()
+
+
 if __name__ == "__main__":
 
     main()
