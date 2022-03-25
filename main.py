@@ -8,7 +8,7 @@ import google.cloud.logging
 import requests
 import twitter
 
-DELTA = 12  # Weeks
+WEEK_DELTA = 12  # Weeks
 LOCATIONS = [
     ("Toronto Enrollment Center", 5027),
     ("Buffalo-Ft. Erie Enrollment Center", 5022),
@@ -17,7 +17,7 @@ LOCATIONS = [
 
 LOGGING_FORMAT = "%(asctime)s %(name)-12s %(levelname)-8s %(message)s"
 
-SCHEDULER_API_URL = "https://ttp.cbp.dhs.gov/schedulerapi/locations/{location}/slots?startTimestamp={start}&endTimestamp={end}"
+SCHEDULER_API_URL = "https://ttp.cbp.dhs.gov/schedulerapi/locations/{location}/slots?startTimestamp={start}&endTimestamp={end}"  # noqa
 TTP_TIME_FORMAT = "%Y-%m-%dT%H:%M"
 
 NOTIF_MESSAGE = "New appointment slot open at {location}: {date}"
@@ -40,10 +40,11 @@ def tweet(message: str) -> None:
         else:
             raise
 
+
 def check_for_openings(location_name: str, location_code: int, test_mode: bool = True) -> None:
 
     start = datetime.now()
-    end = start + timedelta(weeks=DELTA)
+    end = start + timedelta(weeks=WEEK_DELTA)
 
     url = SCHEDULER_API_URL.format(
         location=location_code,
@@ -70,46 +71,38 @@ def check_for_openings(location_name: str, location_code: int, test_mode: bool =
             if test_mode:
                 print(message)
             else:
-                logging.info("Tweeting: " + message)
+                logging.info(f"Tweeting: {message}")
                 tweet(message)
             return  # Halt on first match
 
     logging.info(f"No openings for {location_name}")
 
 
-def setup_logging(test_mode: bool) -> None:
-
-    if test_mode:
-        logging.basicConfig(
-            format=LOGGING_FORMAT,
-            level=logging.INFO,
-            stream=sys.stdout
-        )
-
-    else:
-        client = google.cloud.logging.Client()
-        client.setup_logging()
-
-
 def main() -> None:
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--test", action="store_true", default=False)
-    parser.add_argument("--verbose", action="store_true", default=False)
     args = parser.parse_args()
 
-    setup_logging(args.test)
-
-    logging.info("Starting checks (locations: {})".format(len(LOCATIONS)))
+    logging.info(f"Starting checks (locations: {len(LOCATIONS)})")
     for location_name, location_code in LOCATIONS:
         check_for_openings(location_name, location_code, args.test)
 
 
 def google_cloud_entry(data, context):
 
+    client = google.cloud.logging.Client()
+    client.setup_logging()
+
     main()
 
 
 if __name__ == "__main__":
+
+    logging.basicConfig(
+        format=LOGGING_FORMAT,
+        level=logging.INFO,
+        stream=sys.stdout
+    )
 
     main()
