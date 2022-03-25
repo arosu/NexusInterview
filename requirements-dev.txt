@@ -1,0 +1,4 @@
+flake8
+google-cloud-logging
+python-twitter
+requests[security]
