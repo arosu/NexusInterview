@@ -13,7 +13,7 @@ Currently live at https://twitter.com/TorontoNexus
 | 5200  | Atlanta Port Office Global Entry Enrollment Center - 157 Tradeport Drive Suite C Atlanta GA 30354 US                                  |
 | 7820  | Austin-Bergstrom International Airport - 3600 Presidential Blvd. Austin-Bergstrom International Airport                               |
 | 7940  | Baltimore Enrollment Center - Baltimore Washington Thurgood Marshall I Lower Level Door 18 Linthicum MD 21240                         |
-| 13321 | Blaine Global Entry Enrollment Center - 8115 Birch Bay Square St. Suite 104 Blaine WA 98230 US                                        |
+| 5020 | Blaine Global Entry Enrollment Center - 8115 Birch Bay Square St. Suite 104 Blaine WA 98230 US                                        |
 | 12161 | Boise Enrollment Center - 4655 S Enterprise Street Boise ID 83705 US                                                                  |
 | 14221 | Boston- Tip O'Neill Federal Building - 10 Causeway Street Room 812 Boston MA 02222 US                                                 |
 | 5441  | Boston-Logan Global Entry Enrollment Center - Logan International Airport Terminal E East Boston MA 02128                             |
